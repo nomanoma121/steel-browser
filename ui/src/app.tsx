@@ -1,43 +1,69 @@
+import { useCallback, useEffect } from "react";
 import { Notice } from "./components/notice";
 import { Rail, type ApiStatus } from "./components/rail";
 import { SessionConsole } from "./components/session-console";
+import { SessionList } from "./components/session-list";
 import { Stage } from "./components/stage";
 import { TopBar } from "./components/top-bar";
-import { useActiveSession, useShortcutKeys, useStoredToggle } from "./hooks";
+import { useSelectedSessionId, useSessions, useShortcutKeys, useStoredToggle } from "./hooks";
+import { pickSession } from "./sessions";
 
 export function App() {
-  const { session, error, refresh } = useActiveSession();
+  const { sessions, error, reload } = useSessions();
+  const [selectedId, select] = useSelectedSessionId();
   const [railOpen, toggleRail] = useStoredToggle("steel-browser:rail", true);
   const [consoleOpen, toggleConsole] = useStoredToggle("steel-browser:console", true);
   const [devtoolsOpen, toggleDevtools] = useStoredToggle("steel-browser:devtools", false);
   useShortcutKeys();
 
+  const session = sessions && pickSession(sessions, selectedId);
+  const sessionId = session?.id ?? null;
+
+  useEffect(() => {
+    if (sessions && sessionId !== selectedId) select(sessionId);
+  }, [sessions, sessionId, selectedId, select]);
+
+  const showSession = useCallback(
+    async (id: string | null) => {
+      await reload().catch(() => undefined);
+      select(id);
+    },
+    [reload, select],
+  );
+
   const status: ApiStatus = error
-    ? session
+    ? sessions
       ? "reconnecting"
       : "offline"
-    : session === undefined
+    : sessions === undefined
     ? "connecting"
     : "online";
 
   return (
     <div className="shell" data-rail={railOpen ? "open" : "closed"}>
-      {railOpen && <Rail status={status} onCollapse={toggleRail} />}
+      {railOpen && (
+        <Rail status={status} onCollapse={toggleRail}>
+          {sessions && <SessionList sessions={sessions} selectedId={sessionId} onSelect={select} />}
+        </Rail>
+      )}
       <div className="body">
         <main className="panel">
           <TopBar
             session={session}
+            sessions={sessions}
             railOpen={railOpen}
             onToggleRail={toggleRail}
             consoleOpen={consoleOpen}
             onToggleConsole={toggleConsole}
             devtoolsOpen={devtoolsOpen}
             onToggleDevtools={toggleDevtools}
-            onSessionChange={refresh}
+            onSelect={select}
+            onStarted={(id) => void showSession(id)}
+            onReleased={() => void showSession(null)}
           />
           {session ? (
-            <div className="workspace">
-              <SessionConsole key={session.id} session={session} hidden={!consoleOpen} />
+            <div key={session.id} className="workspace">
+              <SessionConsole session={session} hidden={!consoleOpen} />
               <Stage session={session} devtoolsOpen={devtoolsOpen} />
             </div>
           ) : error ? (
@@ -46,7 +72,7 @@ export function App() {
             </Notice>
           ) : session === null ? (
             <Notice title="No session">
-              Start one with <code>POST /v1/sessions</code>.
+              Start one with the Start session button or <code>POST /v1/sessions</code>.
             </Notice>
           ) : (
             <Notice title="Connecting" busy />

@@ -129,7 +129,8 @@ p {
   color: var(--sand-12);
 }
 
-.rail-item[aria-current="page"] {
+.rail-item[aria-current="page"],
+.rail-item[aria-current="true"] {
   background: var(--rail-active-bg);
   color: var(--sand-12);
 }
@@ -150,6 +151,66 @@ p {
   width: 14px;
   height: 14px;
   color: var(--sand-10);
+}
+
+button.rail-item {
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rail-empty {
+  padding: 8px;
+  color: var(--sand-9);
+}
+
+.session-dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  margin: 0 5px;
+  border-radius: 50%;
+  background: var(--sand-8);
+}
+
+.session-dot[data-status="live"] {
+  background: var(--green-9);
+}
+
+.session-dot[data-status="idle"] {
+  background: var(--yellow-9);
+  animation: pulse 1.2s var(--ease-out) infinite;
+}
+
+.session-dot[data-status="failed"] {
+  background: var(--red-9);
+}
+
+.session-item-id {
+  font-family: var(--font-mono);
+}
+
+.session-item-time {
+  flex-shrink: 0;
+  color: var(--sand-9);
+  font-variant-numeric: tabular-nums;
+}
+
+.session-switcher {
+  height: 28px;
+  min-width: 0;
+  max-width: 260px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-button);
+  background: var(--field-bg);
+  color: var(--sand-12);
+  font: inherit;
+}
+
+.shell[data-rail="open"] .session-switcher {
+  display: none;
 }
 
 .rail-foot {
@@ -1149,6 +1210,10 @@ p {
 
   .shell[data-rail] .body {
     padding: 8px;
+  }
+
+  .shell[data-rail] .session-switcher {
+    display: block;
   }
 
   .workspace {

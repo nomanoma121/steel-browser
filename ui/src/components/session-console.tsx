@@ -34,7 +34,7 @@ export function SessionConsole({ session, hidden }: { session: SessionDetails; h
   const [query, setQuery] = useState("");
   const search = useDeferredValue(query.trim().toLowerCase());
   const input = useRef<HTMLInputElement>(null);
-  const logs = useLogs();
+  const logs = useLogs(session.status === "live" ? session.id : null);
 
   const visible = useMemo(
     () => logs.filter((entry) => matches(entry, filter, search)),
@@ -121,7 +121,13 @@ export function SessionConsole({ session, hidden }: { session: SessionDetails; h
       </div>
       <Logs
         entries={visible}
-        empty={logs.length === 0 ? "Waiting for browser events…" : "No logs match."}
+        empty={
+          logs.length > 0
+            ? "No logs match."
+            : session.status === "live"
+            ? "Waiting for browser events…"
+            : "No logs for this session."
+        }
         onScrolledChange={setScrolled}
       />
     </section>
