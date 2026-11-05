@@ -124,6 +124,8 @@ export class CDPService extends EventEmitter {
   private launchMutators: ((config: BrowserLauncherOptions) => Promise<void> | void)[] = [];
   private shutdownMutators: ((config: BrowserLauncherOptions | null) => Promise<void> | void)[] =
     [];
+  // Not an EventEmitter listener: shutdown() calls removeAllListeners().
+  private sessionEndedHooks: ((sessionId: string | undefined) => void)[] = [];
   private proxyWebSocketHandler:
     | ((req: IncomingMessage, socket: Duplex, head: Buffer) => Promise<void>)
     | null = null;
@@ -253,6 +255,10 @@ export class CDPService extends EventEmitter {
 
   public registerShutdownHook(fn: (config: BrowserLauncherOptions | null) => Promise<void> | void) {
     this.shutdownMutators.push(fn);
+  }
+
+  public registerSessionEndedHook(fn: (sessionId: string | undefined) => void) {
+    this.sessionEndedHooks.push(fn);
   }
 
   private removeAllHandlers() {
@@ -646,7 +652,6 @@ export class CDPService extends EventEmitter {
 
       this.fingerprintData = null;
       this.currentSessionConfig = null;
-      this.instrumentationLogger.resetContext();
       this.browserInstance = null;
       this.wsEndpoint = null;
       this.emit("close");
@@ -659,7 +664,6 @@ export class CDPService extends EventEmitter {
       await this.shutdownHook();
 
       this.browserInstance = null;
-      this.instrumentationLogger.resetContext();
       this.shuttingDown = false;
     }
   }
@@ -1533,6 +1537,7 @@ export class CDPService extends EventEmitter {
       return await this.launch(sessionConfig);
     } catch (error) {
       // If launch fails, ensure we still notify plugins about session end to allow for proper cleanup
+      this.instrumentationLogger.resetContext();
       await this.pluginManager.onBeforeSessionEnd(sessionConfig);
       await this.pluginManager.onSessionEnd(sessionConfig);
       await this.pluginManager.onAfterSessionEnd(sessionConfig);
@@ -1569,10 +1574,10 @@ export class CDPService extends EventEmitter {
         this.pluginManager.onTargetSession.bind(this.pluginManager),
       );
     } finally {
-      await this.pluginManager.onAfterSessionEnd(sessionConfig);
+      await this.pluginManager.onAfterSessionEnd(sessionConfig).finally(() => {
+        for (const hook of this.sessionEndedHooks) hook(sessionConfig?.sessionId);
+      });
     }
-
-    this.emit("sessionEnded", sessionConfig?.sessionId, reason);
 
     // Standalone users keep the historical idle browser. Session-pool sessions
     // leave their slot stopped unless the caller explicitly requests otherwise.

@@ -74,10 +74,9 @@ async function routes(server: FastifyInstance) {
     async (request: FastifyRequest<{ Params: { sessionId: string } }>, reply: FastifyReply) => {
       const engine = server.commandEngine?.get(request.params.sessionId);
       if (!engine) {
-        return reply.code(404).send({
-          error: "session_not_found",
-          message: `Session ${request.params.sessionId} is not active.`,
-        });
+        return reply
+          .code(410)
+          .send({ error: { code: "session_ended", message: "The session ended." } });
       }
       const key = request.headers["idempotency-key"];
       const response = await engine.handle({

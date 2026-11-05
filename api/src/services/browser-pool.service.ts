@@ -99,10 +99,11 @@ export class BrowserPool {
     for (const slot of this.slots) slot.cdpService.registerShutdownHook(hook);
   }
 
-  registerSessionEndedHook(
-    hook: (sessionId: string | undefined, reason: ShutdownReason) => void,
-  ): void {
-    for (const slot of this.slots) slot.cdpService.on("sessionEnded", hook);
+  registerSessionEndedHook(hook: (sessionId: string | undefined) => void): void {
+    for (const slot of this.slots) {
+      slot.cdpService.registerSessionEndedHook(hook);
+      slot.seleniumService.on("unexpectedExit", hook);
+    }
   }
 
   async shutdownAll(): Promise<void> {

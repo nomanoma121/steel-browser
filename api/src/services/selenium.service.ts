@@ -11,6 +11,7 @@ export class SeleniumService extends EventEmitter {
   private port: number;
   private launchOptions?: BrowserLauncherOptions;
   private logger: FastifyBaseLogger;
+  private stopping = new WeakSet<ChildProcess>();
 
   constructor(logger: FastifyBaseLogger, port = 4444) {
     super();
@@ -43,7 +44,8 @@ export class SeleniumService extends EventEmitter {
 
     const seleniumArgs = ["-jar", seleniumServerPath, "standalone", "--port", String(this.port)];
 
-    this.seleniumProcess = spawn("java", seleniumArgs);
+    const seleniumProcess = spawn("java", seleniumArgs);
+    this.seleniumProcess = seleniumProcess;
     this.seleniumServerUrl = `http://localhost:${this.port}`;
 
     this.seleniumProcess.stdout?.on("data", (data) => {
@@ -66,7 +68,9 @@ export class SeleniumService extends EventEmitter {
 
     this.seleniumProcess.on("close", (code) => {
       this.logger.info(`Selenium process exited with code ${code}`);
+      if (this.seleniumProcess !== seleniumProcess) return;
       this.seleniumProcess = null;
+      if (!this.stopping.has(seleniumProcess)) this.emit("unexpectedExit", launchOptions.sessionId);
     });
 
     await new Promise<void>((resolve, reject) => {
@@ -99,6 +103,7 @@ export class SeleniumService extends EventEmitter {
   public async close(): Promise<void> {
     const process = this.seleniumProcess;
     if (!process) return;
+    this.stopping.add(process);
 
     const waitForClose = (timeoutMs: number) =>
       new Promise<boolean>((resolve) => {

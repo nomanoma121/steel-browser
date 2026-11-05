@@ -10,7 +10,9 @@ function fixture() {
       changes++;
     },
   };
-  const server = { commandEngine: engine } as unknown as FastifyInstance;
+  const server = {
+    commandEngine: { get: (id: string) => (id === "s1" ? engine : undefined) },
+  } as unknown as FastifyInstance;
   return { engine, server, reply: {} as FastifyReply, changes: () => changes };
 }
 
@@ -23,6 +25,7 @@ describe("quick action tracking", () => {
       { body: {} },
       reply,
       () => new Promise<void>((resolve) => (finish = resolve)),
+      "s1",
     );
     let done = false;
     const waiting = quickActionsDone(engine).then(() => {
@@ -52,6 +55,7 @@ describe("quick action tracking", () => {
       { body: { proxyUrl: "http://proxy.test:8080" } },
       reply,
       () => new Promise<void>((resolve) => (finish = resolve)),
+      "s1",
     );
     await quickActionsDone(engine);
     finish();

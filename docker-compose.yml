@@ -1,6 +1,8 @@
 services:
   api:
-    image: ghcr.io/steel-dev/steel-browser-api:latest
+    build:
+      context: .
+      dockerfile: ./api/Dockerfile
     shm_size: "2gb"
     command: ["--no-nginx"]
     ports:
@@ -28,7 +30,9 @@ services:
       - steel-network
 
   ui:
-    image: ghcr.io/steel-dev/steel-browser-ui:latest
+    build:
+      context: .
+      dockerfile: ./ui/Dockerfile
     ports:
       - "5173:80"
     environment:

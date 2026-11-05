@@ -49,6 +49,7 @@ describe("handleCastSession cleanup", () => {
 
     mockSocket = {
       destroy: vi.fn(),
+      end: vi.fn(),
       on: vi.fn(),
     };
 
@@ -64,12 +65,30 @@ describe("handleCastSession cleanup", () => {
       }),
     };
 
-    mockSessionService = {
-      activeSession: Promise.resolve({
-        id: "session-abc",
-        dimensions: { width: 1920, height: 1080 },
-      }),
+    const session = {
+      id: "session-abc",
+      dimensions: { width: 1920, height: 1080 },
+      isSelenium: false,
+      cdpService: { isRunning: () => true, getWsEndpoint: () => "ws://fixture/browser" },
     };
+    mockSessionService = {
+      getLiveSession: (id: string) => (id === session.id ? session : undefined),
+      getOnlyActiveSession: () => session,
+    };
+  });
+
+  it("rejects a cast for a session that is not live", async () => {
+    await handleCastSession(
+      { url: "/v1/sessions/other/cast" } as any,
+      mockSocket as any,
+      Buffer.alloc(0),
+      mockWss as any,
+      mockSessionService as any,
+      {},
+    );
+
+    expect(mockSocket.end).toHaveBeenCalledWith(expect.stringContaining("404"));
+    expect(puppeteer.connect).not.toHaveBeenCalled();
   });
 
   it("disconnects the browser when the requested pageId is not found", async () => {

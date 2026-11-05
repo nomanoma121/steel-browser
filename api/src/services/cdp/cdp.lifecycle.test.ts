@@ -333,6 +333,26 @@ describe("CDPService lifecycle hook ownership", () => {
     ]);
     await service.shutdown(ShutdownReason.SESSION_END);
   });
+
+  test("notifies session-ended hooks when a pooled session's browser crashes", async () => {
+    const browsers: Browser[] = [];
+    vi.mocked(puppeteer.launch).mockImplementation(async () => {
+      const browser = fakeBrowser();
+      browsers.push(browser);
+      return browser;
+    });
+    const { service } = lifecycleFixture();
+    const ended = vi.fn();
+    service.registerSessionEndedHook(ended);
+
+    await service.launch();
+    await service.startNewSession({ ...sessionConfig("first", "m"), sessionId: "first" });
+    (browsers[1] as unknown as EventEmitter).emit("disconnected");
+    await vi.waitFor(() => expect(ended).toHaveBeenCalledWith("first"));
+
+    expect(ended).toHaveBeenCalledTimes(1);
+    expect(browsers).toHaveLength(2);
+  });
 });
 
 describe("CDPService profile lock", () => {

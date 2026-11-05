@@ -2,6 +2,7 @@ import fastifyMultipart from "@fastify/multipart";
 import { FastifyInstance, FastifyRequest } from "fastify";
 import { $ref } from "../../plugins/schemas.js";
 import { FileService } from "../../services/file.service.js";
+import { SessionServiceError } from "../../services/session.service.js";
 import { MB } from "../../utils/size.js";
 import { FilesController } from "./files.controller.js";
 
@@ -15,6 +16,18 @@ async function routes(server: FastifyInstance) {
     },
     attachFieldsToBody: false,
   });
+
+  server.addHook(
+    "onRequest",
+    async (request: FastifyRequest<{ Params: { sessionId: string } }>, reply) => {
+      try {
+        server.sessionService.resolveLiveSession(request.params.sessionId);
+      } catch (error) {
+        const statusCode = error instanceof SessionServiceError ? error.statusCode : 500;
+        return reply.code(statusCode).send({ message: (error as Error).message });
+      }
+    },
+  );
 
   server.post(
     "/sessions/:sessionId/files",
