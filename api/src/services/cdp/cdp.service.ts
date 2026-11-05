@@ -114,6 +114,8 @@ export class CDPService extends EventEmitter {
   private retryManager: RetryManager;
   private targetInstrumentationManager: TargetInstrumentationManager;
   private instrumentationLogger: BrowserLogger;
+  private readonly cdpPort: number;
+  private readonly remoteDebuggingAddress: string;
 
   private blockedHosts: string[] = [];
   private compiledUrlPatterns: RegExp[] = [];
@@ -122,20 +124,28 @@ export class CDPService extends EventEmitter {
   private launchMutators: ((config: BrowserLauncherOptions) => Promise<void> | void)[] = [];
   private shutdownMutators: ((config: BrowserLauncherOptions | null) => Promise<void> | void)[] =
     [];
+  // Not an EventEmitter listener: shutdown() calls removeAllListeners().
+  private sessionEndedHooks: ((sessionId: string | undefined) => void)[] = [];
   private proxyWebSocketHandler:
     | ((req: IncomingMessage, socket: Duplex, head: Buffer) => Promise<void>)
     | null = null;
   private disconnectHandler: () => Promise<void> = () => this.endSession();
 
   constructor(
-    config: { keepAlive?: boolean },
+    config: { keepAlive?: boolean; cdpPort?: number; remoteDebuggingAddress?: string },
     logger: FastifyBaseLogger,
     storage?: any,
     enableConsoleLogging?: boolean,
   ) {
     super();
     this.logger = logger.child({ component: "CDPService" });
-    const { keepAlive = true } = config;
+    const {
+      keepAlive = true,
+      cdpPort = env.CDP_PORT_BASE ?? 9222,
+      remoteDebuggingAddress = env.HOST,
+    } = config;
+    this.cdpPort = cdpPort;
+    this.remoteDebuggingAddress = remoteDebuggingAddress;
 
     this.keepAlive = keepAlive;
     this.browserInstance = null;
@@ -205,6 +215,10 @@ export class CDPService extends EventEmitter {
     return this.instrumentationLogger;
   }
 
+  public getWsEndpoint(): string | null {
+    return this.wsEndpoint;
+  }
+
   public getLogger(name: string) {
     return this.logger.child({ component: name });
   }
@@ -243,13 +257,19 @@ export class CDPService extends EventEmitter {
     this.shutdownMutators.push(fn);
   }
 
+  public registerSessionEndedHook(fn: (sessionId: string | undefined) => void) {
+    this.sessionEndedHooks.push(fn);
+  }
+
   private removeAllHandlers() {
     this.browserInstance?.removeAllListeners();
     this.removeAllListeners();
   }
 
   public isRunning(): boolean {
-    return this.browserInstance?.process() !== null;
+    return Boolean(
+      this.browserInstance && this.browserInstance.process() && this.browserInstance.isConnected(),
+    );
   }
 
   public getTargetId(page: Page) {
@@ -285,6 +305,28 @@ export class CDPService extends EventEmitter {
     return `${wsProtocol}://${baseUrl}/devtools/page/${
       pageId ?? this.getTargetId(this.primaryPage!)
     }`;
+  }
+
+  public getPageTargetId(pageId?: string): string | null {
+    if (!this.wsEndpoint || !this.browserInstance) return null;
+    const targetId = pageId ?? (this.primaryPage ? this.getTargetId(this.primaryPage) : undefined);
+    if (!targetId) return null;
+    const target = this.browserInstance
+      .targets()
+      .find(
+        (candidate) =>
+          candidate.type() === "page" &&
+          (candidate as unknown as { _targetId: string })._targetId === targetId,
+      );
+    return target ? targetId : null;
+  }
+
+  public getPageWsEndpoint(pageId?: string): string | null {
+    const targetId = this.getPageTargetId(pageId);
+    if (!targetId || !this.wsEndpoint) return null;
+    const endpoint = new URL(this.wsEndpoint);
+    endpoint.pathname = `/devtools/page/${encodeURIComponent(targetId)}`;
+    return endpoint.toString();
   }
 
   public async refreshPrimaryPage(signal?: AbortSignal) {
@@ -608,14 +650,6 @@ export class CDPService extends EventEmitter {
       await this.browserInstance?.process()?.kill();
       await this.shutdownHook();
 
-      this.logger.info("[CDPService] Cleaning up files during shutdown");
-      try {
-        await FileService.getInstance().cleanupFiles();
-        this.logger.info("[CDPService] Files cleaned successfully");
-      } catch (error) {
-        this.logger.error(`[CDPService] Error cleaning files during shutdown: ${error}`);
-      }
-
       this.fingerprintData = null;
       this.currentSessionConfig = null;
       this.browserInstance = null;
@@ -628,14 +662,6 @@ export class CDPService extends EventEmitter {
       await this.browserInstance?.close();
       await this.browserInstance?.process()?.kill();
       await this.shutdownHook();
-
-      try {
-        await FileService.getInstance().cleanupFiles();
-      } catch (cleanupError) {
-        this.logger.error(
-          `[CDPService] Error cleaning files during error recovery: ${cleanupError}`,
-        );
-      }
 
       this.browserInstance = null;
       this.shuttingDown = false;
@@ -790,7 +816,7 @@ export class CDPService extends EventEmitter {
         await executeOptional(
           this.logger,
           async () => {
-            await FileService.getInstance().cleanupFiles();
+            await FileService.getInstance(this.launchConfig?.sessionId).cleanupFiles();
             this.logger.info("[CDPService] Files cleaned successfully before launch");
           },
           (error) =>
@@ -1024,8 +1050,8 @@ export class CDPService extends EventEmitter {
 
         const dynamicArgs = [
           this.launchConfig.dimensions ? "" : "--start-maximized",
-          `--remote-debugging-address=${env.HOST}`,
-          "--remote-debugging-port=9222",
+          `--remote-debugging-address=${this.remoteDebuggingAddress}`,
+          `--remote-debugging-port=${this.cdpPort}`,
           `--window-size=${this.launchConfig.dimensions?.width ?? 1920},${
             this.launchConfig.dimensions?.height ?? 1080
           }`,
@@ -1164,7 +1190,9 @@ export class CDPService extends EventEmitter {
         await executeBestEffort(
           this.logger,
           async () => {
-            const downloadPath = FileService.getInstance().getBaseFilesPath();
+            const downloadPath = FileService.getInstance(
+              this.currentSessionConfig?.sessionId,
+            ).getBaseFilesPath();
             const cdpSession = await this.browserInstance!.target().createCDPSession();
             await cdpSession.send("Browser.setDownloadBehavior", {
               behavior: "allow",
@@ -1264,14 +1292,20 @@ export class CDPService extends EventEmitter {
   }
 
   @traceable
-  public async proxyWebSocket(req: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
+  public async proxyWebSocket(
+    req: IncomingMessage,
+    socket: Duplex,
+    head: Buffer,
+    targetOverride?: string,
+  ): Promise<void> {
     if (this.proxyWebSocketHandler) {
       this.logger.info("[CDPService] Using custom WebSocket proxy handler");
       await this.proxyWebSocketHandler(req, socket, head);
       return;
     }
 
-    if (!this.wsEndpoint) {
+    const target = targetOverride ?? this.wsEndpoint;
+    if (!target) {
       throw new Error(`WebSocket endpoint not available. Ensure the browser is launched first.`);
     }
 
@@ -1304,7 +1338,8 @@ export class CDPService extends EventEmitter {
       socket,
       head,
       {
-        target: this.wsEndpoint,
+        target,
+        ignorePath: true,
       },
       (error) => {
         if (error) {
@@ -1481,6 +1516,7 @@ export class CDPService extends EventEmitter {
     // the incoming config only after teardown (or when reusing the browser), so
     // incoming metadata cannot affect cleanup of the previous browser instance.
     this.trackedOrigins.clear(); // Clear tracked origins when starting a new session
+    this.instrumentationLogger.setContext({ sessionId: sessionConfig.sessionId });
 
     // Recreate target instrumentation manager with session-specific options
     this.targetInstrumentationManager = new TargetInstrumentationManager(
@@ -1501,6 +1537,7 @@ export class CDPService extends EventEmitter {
       return await this.launch(sessionConfig);
     } catch (error) {
       // If launch fails, ensure we still notify plugins about session end to allow for proper cleanup
+      this.instrumentationLogger.resetContext();
       await this.pluginManager.onBeforeSessionEnd(sessionConfig);
       await this.pluginManager.onSessionEnd(sessionConfig);
       await this.pluginManager.onAfterSessionEnd(sessionConfig);
@@ -1509,7 +1546,10 @@ export class CDPService extends EventEmitter {
   }
 
   @traceable
-  public async endSession(reason: ShutdownReason = ShutdownReason.SESSION_END): Promise<void> {
+  public async endSession(
+    reason: ShutdownReason = ShutdownReason.SESSION_END,
+    options: { relaunchDefault?: boolean } = {},
+  ): Promise<void> {
     this.logger.info("Ending current session and resetting to default configuration.");
     const sessionConfig = this.currentSessionConfig!;
 
@@ -1534,11 +1574,17 @@ export class CDPService extends EventEmitter {
         this.pluginManager.onTargetSession.bind(this.pluginManager),
       );
     } finally {
-      await this.pluginManager.onAfterSessionEnd(sessionConfig);
+      await this.pluginManager.onAfterSessionEnd(sessionConfig).finally(() => {
+        for (const hook of this.sessionEndedHooks) hook(sessionConfig?.sessionId);
+      });
     }
 
-    // Relaunch the idle browser
-    await this.launch(this.defaultLaunchConfig);
+    // Standalone users keep the historical idle browser. Session-pool sessions
+    // leave their slot stopped unless the caller explicitly requests otherwise.
+    const relaunchDefault = options.relaunchDefault ?? !sessionConfig?.sessionId;
+    if (relaunchDefault) {
+      await this.launch(this.defaultLaunchConfig);
+    }
   }
 
   private async onDisconnect(): Promise<void> {

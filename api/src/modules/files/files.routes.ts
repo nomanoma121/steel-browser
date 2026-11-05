@@ -2,11 +2,13 @@ import fastifyMultipart from "@fastify/multipart";
 import { FastifyInstance, FastifyRequest } from "fastify";
 import { $ref } from "../../plugins/schemas.js";
 import { FileService } from "../../services/file.service.js";
+import { SessionServiceError } from "../../services/session.service.js";
 import { MB } from "../../utils/size.js";
 import { FilesController } from "./files.controller.js";
 
 async function routes(server: FastifyInstance) {
-  const filesController = new FilesController(FileService.getInstance());
+  const filesController = (sessionId: string) =>
+    new FilesController(FileService.getInstance(sessionId));
 
   await server.register(fastifyMultipart, {
     limits: {
@@ -14,6 +16,18 @@ async function routes(server: FastifyInstance) {
     },
     attachFieldsToBody: false,
   });
+
+  server.addHook(
+    "onRequest",
+    async (request: FastifyRequest<{ Params: { sessionId: string } }>, reply) => {
+      try {
+        server.sessionService.resolveLiveSession(request.params.sessionId);
+      } catch (error) {
+        const statusCode = error instanceof SessionServiceError ? error.statusCode : 500;
+        return reply.code(statusCode).send({ message: (error as Error).message });
+      }
+    },
+  );
 
   server.post(
     "/sessions/:sessionId/files",
@@ -37,7 +51,7 @@ async function routes(server: FastifyInstance) {
         Params: { sessionId: string };
       }>,
       reply,
-    ) => filesController.handleFileUpload(server, request, reply),
+    ) => filesController(request.params.sessionId).handleFileUpload(server, request, reply),
   );
 
   server.head(
@@ -51,7 +65,7 @@ async function routes(server: FastifyInstance) {
       },
     },
     async (request: FastifyRequest<{ Params: { sessionId: string; "*": string } }>, reply) =>
-      filesController.handleFileHead(server, request, reply),
+      filesController(request.params.sessionId).handleFileHead(server, request, reply),
   );
 
   server.get(
@@ -65,7 +79,7 @@ async function routes(server: FastifyInstance) {
       },
     },
     async (request: FastifyRequest<{ Params: { sessionId: string; "*": string } }>, reply) =>
-      filesController.handleFileDownload(server, request, reply),
+      filesController(request.params.sessionId).handleFileDownload(server, request, reply),
   );
 
   server.get(
@@ -86,7 +100,7 @@ async function routes(server: FastifyInstance) {
         Params: { sessionId: string };
       }>,
       reply,
-    ) => filesController.handleFileList(server, request, reply),
+    ) => filesController(request.params.sessionId).handleFileList(server, request, reply),
   );
 
   server.delete(
@@ -106,7 +120,7 @@ async function routes(server: FastifyInstance) {
       },
     },
     async (request: FastifyRequest<{ Params: { sessionId: string; "*": string } }>, reply) =>
-      filesController.handleFileDelete(server, request, reply),
+      filesController(request.params.sessionId).handleFileDelete(server, request, reply),
   );
 
   server.delete(
@@ -127,7 +141,7 @@ async function routes(server: FastifyInstance) {
     },
 
     async (request: FastifyRequest<{ Params: { sessionId: string } }>, reply) =>
-      filesController.handleFileDeleteAll(server, request, reply),
+      filesController(request.params.sessionId).handleFileDeleteAll(server, request, reply),
   );
 
   server.get(
@@ -141,7 +155,7 @@ async function routes(server: FastifyInstance) {
       },
     },
     async (request: FastifyRequest<{ Params: { sessionId: string } }>, reply) =>
-      filesController.handleDownloadArchive(server, request, reply),
+      filesController(request.params.sessionId).handleDownloadArchive(server, request, reply),
   );
 }
 

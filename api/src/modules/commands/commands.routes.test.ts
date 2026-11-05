@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import type { CDPService } from "../../services/cdp/cdp.service.js";
 import type { EngineHost } from "../../services/commands/engine.js";
 import { ShutdownReason, type BasePlugin } from "../../services/cdp/plugins/core/base-plugin.js";
-import type { SessionService } from "../../services/session.service.js";
+import type { Session, SessionService } from "../../services/session.service.js";
 import type { BrowserLauncherOptions } from "../../types/browser.js";
 import { schemas } from "../../plugins/schemas.js";
 import actionsRoutes from "../actions/actions.routes.js";
@@ -20,7 +20,6 @@ describe.skipIf(!chrome)("commands route", () => {
   let page: Page;
   let app: FastifyInstance;
   let plugin: BasePlugin;
-  const session = { id: "live", status: "live" };
   const config = {} as BrowserLauncherOptions;
 
   beforeAll(async () => {
@@ -32,15 +31,19 @@ describe.skipIf(!chrome)("commands route", () => {
     page = (await browser.pages())[0] ?? (await browser.newPage());
     await page.setContent(`<button onclick="document.title = 'clicked'">Go</button>`);
     app = Fastify();
-    app.decorate("cdpService", {
+    const cdpService = {
       getBrowserInstance: () => browser,
       waitForPageSetup: async () => undefined,
       registerPlugin: (registered: BasePlugin) => {
         plugin = registered;
       },
-    } as unknown as CDPService);
-    app.decorate("sessionService", { activeSession: session } as unknown as SessionService);
+    } as unknown as CDPService;
+    const session = { id: "live", status: "live", starting: false, cdpService } as Session;
+    const { sessionService, startSession } = sessionServiceFixture(session);
+    app.decorate("cdpService", cdpService);
+    app.decorate("sessionService", sessionService);
     app.decorate("commandEngine", createCommandEngine(app));
+    startSession();
     for (const schema of schemas) {
       app.addSchema(schema);
     }
@@ -194,35 +197,58 @@ describe.skipIf(!chrome)("commands route", () => {
   });
 });
 
+function sessionServiceFixture(session: Session) {
+  let onStart: (session: Session) => void = () => {};
+  const sessionService = {
+    addSessionStartHook: (hook: typeof onStart) => {
+      onStart = hook;
+    },
+    addSessionEndHook: () => undefined,
+    getOnlyActiveSession: () => (session.status === "live" ? session : null),
+    getSession: (id: string) => (id === session.id ? session : undefined),
+    endSession: vi.fn().mockResolvedValue(undefined),
+  };
+  return {
+    sessionService: sessionService as unknown as SessionService,
+    endSession: sessionService.endSession,
+    startSession: () => onStart(session),
+  };
+}
+
+function hostFixture(id: string) {
+  const session = {
+    id,
+    status: "live",
+    starting: false,
+    isSelenium: false,
+    cdpService: { registerPlugin: () => undefined },
+  } as unknown as Session;
+  const { sessionService, endSession, startSession } = sessionServiceFixture(session);
+  const server = { sessionService } as unknown as FastifyInstance;
+  const engines = createCommandEngine(server);
+  startSession();
+  const host = (engines.get(id) as unknown as { host: EngineHost }).host;
+  return { host, session, endSession };
+}
+
 describe("commands host", () => {
   test("ends only the live session the engine runs", async () => {
-    const endSession = vi.fn().mockResolvedValue(undefined);
-    const activeSession = { id: "live", status: "live" };
-    const server = {
-      cdpService: { registerPlugin: () => undefined },
-      sessionService: { activeSession, endSession },
-    } as unknown as FastifyInstance;
-    const host = (createCommandEngine(server) as unknown as { host: EngineHost }).host;
+    const { host, session, endSession } = hostFixture("live");
     await host.endSession("old");
     expect(endSession).not.toHaveBeenCalled();
-    activeSession.status = "released";
+    session.status = "released";
     await host.endSession("live");
     expect(endSession).not.toHaveBeenCalled();
-    activeSession.status = "live";
+    session.status = "live";
     await host.endSession("live");
-    expect(endSession).toHaveBeenCalledTimes(1);
+    expect(endSession).toHaveBeenCalledWith("live");
   });
 
-  test("treats a session as released once another session is live", () => {
-    const activeSession = { id: "new", status: "live" };
-    const server = {
-      cdpService: { registerPlugin: () => undefined },
-      sessionService: { activeSession },
-    } as unknown as FastifyInstance;
-    const host = (createCommandEngine(server) as unknown as { host: EngineHost }).host;
+  test("treats other sessions and released sessions as released", () => {
+    const { host, session } = hostFixture("new");
     expect(host.released("old")).toBe(true);
     expect(host.released("new")).toBe(false);
-    activeSession.status = "released";
+    session.status = "released";
     expect(host.released("new")).toBe(true);
   });
 });
