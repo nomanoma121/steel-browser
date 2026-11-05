@@ -6,7 +6,7 @@ import { getPageFavicon, getPageTitle } from "../../utils/casting.js";
 const MIN_ACK_INTERVAL_MS = 1000 / 30;
 const SETTLE_DELAY_MS = 150;
 const METADATA_REFRESH_MS = 1000;
-const JPEG_QUALITY = 75;
+const JPEG_QUALITY = 90;
 
 export type CastFormat = "json" | "binary";
 
