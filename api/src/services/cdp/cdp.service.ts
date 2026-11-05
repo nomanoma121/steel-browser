@@ -1340,6 +1340,8 @@ export class CDPService extends EventEmitter {
       {
         target,
         ignorePath: true,
+        // Chrome rejects WebSocket upgrades whose Host is not localhost or an IP.
+        changeOrigin: true,
       },
       (error) => {
         if (error) {
