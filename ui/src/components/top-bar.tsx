@@ -1,6 +1,6 @@
 import type { SessionDetails } from "../api";
 import { CopyButton } from "./copy-button";
-import { ChevronRightIcon, ConsoleIcon, DevToolsIcon, RailIcon } from "./icons";
+import { ChevronRightIcon, ConsoleIcon, DevToolsIcon, FullscreenIcon, RailIcon } from "./icons";
 import { NewSessionButton } from "./new-session";
 import { ReleaseButton } from "./release-button";
 import { SessionSwitcher } from "./session-list";
@@ -69,6 +69,18 @@ export function TopBar({
           onClick={onToggleDevtools}
         >
           <DevToolsIcon />
+        </button>
+      )}
+      {session?.status === "live" && session.debugUrl && (
+        <button
+          type="button"
+          className="bar-button fullscreen-toggle"
+          aria-label="Fullscreen live view"
+          title="Fullscreen live view (F)"
+          data-shortcut="f"
+          onClick={() => void document.querySelector(".live-frame")?.requestFullscreen()}
+        >
+          <FullscreenIcon />
         </button>
       )}
       <nav className="crumbs" aria-label="Breadcrumb">

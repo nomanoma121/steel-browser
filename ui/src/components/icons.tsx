@@ -123,6 +123,14 @@ export function DevToolsIcon(props: IconProps) {
   );
 }
 
+export function FullscreenIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M2.75 6V2.75H6M10 2.75h3.25V6M13.25 10v3.25H10M6 13.25H2.75V10" />
+    </Icon>
+  );
+}
+
 export function WindowIcon(props: IconProps) {
   return (
     <Icon {...props}>
