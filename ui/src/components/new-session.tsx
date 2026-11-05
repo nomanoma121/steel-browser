@@ -10,7 +10,7 @@ const devices = [
   { value: "mobile", label: "Mobile" },
 ] as const;
 
-export function NewSessionButton({ onStarted }: { onStarted: () => void }) {
+export function NewSessionButton({ onStarted }: { onStarted: (id: string) => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [device, setDevice] = useState<Device>("desktop");
   const [pending, setPending] = useState(false);
@@ -31,7 +31,7 @@ export function NewSessionButton({ onStarted }: { onStarted: () => void }) {
     setPending(true);
     setError(null);
     try {
-      await createSession({
+      const session = await createSession({
         deviceConfig: { device },
         dimensions: width && height ? { width: Number(width), height: Number(height) } : undefined,
         userAgent: text("userAgent"),
@@ -41,7 +41,7 @@ export function NewSessionButton({ onStarted }: { onStarted: () => void }) {
       dialog.current?.close();
       form.reset();
       setDevice("desktop");
-      onStarted();
+      onStarted(session.id);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -76,7 +76,7 @@ export function NewSessionButton({ onStarted }: { onStarted: () => void }) {
               Start a new session
             </h2>
             <p id="new-session-description" className="dialog-description">
-              Configure options and start a new session. The current browser closes.
+              Configure options and start a new session. Other sessions keep running.
             </p>
           </div>
           <div className="dialog-body">

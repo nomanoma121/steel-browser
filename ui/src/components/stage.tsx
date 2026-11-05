@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from "react";
-import { apiUrl, type SessionDetails } from "../api";
+import { apiUrl, sessionPath, type SessionDetails } from "../api";
 import { useColorScheme, usePageId } from "../hooks";
 import { Details } from "./details";
 import { Notice } from "./notice";
@@ -92,8 +92,8 @@ function LiveFrame({ url }: { url: string }) {
   );
 }
 
-function DevTools() {
-  const pageId = usePageId();
+function DevTools({ sessionId }: { sessionId: string }) {
+  const pageId = usePageId(sessionId);
   const query = pageId ? `?pageId=${encodeURIComponent(pageId)}` : "";
 
   return (
@@ -101,7 +101,7 @@ function DevTools() {
       <iframe
         title="Chrome DevTools"
         className="dock-frame"
-        src={apiUrl(`/v1/devtools/inspector.html${query}`)}
+        src={apiUrl(sessionPath(sessionId, `devtools/inspector.html${query}`))}
       />
     </div>
   );
@@ -114,11 +114,24 @@ export function Stage({
   session: SessionDetails;
   devtoolsOpen: boolean;
 }) {
-  const docked = devtoolsOpen && Boolean(session.debugUrl);
+  const live = session.status === "live";
+  const docked = live && devtoolsOpen && Boolean(session.debugUrl);
 
   return (
     <section className="stage" data-devtools={docked ? "open" : "closed"} aria-label="Live view">
-      {session.debugUrl ? (
+      {session.status === "idle" ? (
+        <div className="player">
+          <Notice title="Starting session" busy />
+        </div>
+      ) : !live ? (
+        <div className="player">
+          <Notice title={session.status === "failed" ? "Session failed" : "Session ended"}>
+            {session.status === "failed"
+              ? "Steel could not start or release this session's browser."
+              : "This session's browser is closed. Pick another session or start a new one."}
+          </Notice>
+        </div>
+      ) : session.debugUrl ? (
         <LiveFrame url={session.debugUrl} />
       ) : (
         <div className="player">
@@ -129,7 +142,7 @@ export function Stage({
           </Notice>
         </div>
       )}
-      {docked && <DevTools />}
+      {docked && <DevTools sessionId={session.id} />}
       <div className="stage-details">
         <Details session={session} />
       </div>

@@ -6,7 +6,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import { getActiveSession, wsUrl, type SessionDetails } from "./api";
+import { getSessions, sessionPath, wsUrl, type SessionDetails } from "./api";
 import { describeEvent, isBrowserEvent, type BrowserEvent, type EventSummary } from "./format";
 
 export type LogEntry = {
@@ -15,15 +15,36 @@ export type LogEntry = {
   summary: EventSummary;
 };
 
-type SessionState = {
-  session: SessionDetails | null | undefined;
+type SessionsState = {
+  sessions: SessionDetails[] | undefined;
   error: string | null;
 };
 
-export function useActiveSession(intervalMs = 1000) {
-  const [state, setState] = useState<SessionState>({ session: undefined, error: null });
-  const [version, setVersion] = useState(0);
-  const refresh = useCallback(() => setVersion((value) => value + 1), []);
+export function useSessions(intervalMs = 1000) {
+  const [state, setState] = useState<SessionsState>({ sessions: undefined, error: null });
+  const requested = useRef(0);
+  const applied = useRef(0);
+
+  // Responses can arrive out of order; apply only the newest request's result.
+  const load = useCallback(async (signal?: AbortSignal) => {
+    const request = (requested.current += 1);
+    try {
+      const sessions = await getSessions(signal);
+      if (request > applied.current) {
+        applied.current = request;
+        setState({ sessions, error: null });
+      }
+      return sessions;
+    } catch (error) {
+      if (!signal?.aborted && request > applied.current) {
+        setState((current) => ({
+          ...current,
+          error: error instanceof Error ? error.message : String(error),
+        }));
+      }
+      throw error;
+    }
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -31,16 +52,7 @@ export function useActiveSession(intervalMs = 1000) {
 
     const poll = async () => {
       if (document.visibilityState === "visible") {
-        try {
-          const session = await getActiveSession(controller.signal);
-          setState({ session, error: null });
-        } catch (error) {
-          if (controller.signal.aborted) return;
-          setState((current) => ({
-            ...current,
-            error: error instanceof Error ? error.message : String(error),
-          }));
-        }
+        await load(controller.signal).catch(() => undefined);
       }
       if (!controller.signal.aborted) timer = window.setTimeout(poll, intervalMs);
     };
@@ -50,15 +62,37 @@ export function useActiveSession(intervalMs = 1000) {
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [intervalMs, version]);
+  }, [intervalMs, load]);
 
-  return { ...state, refresh };
+  const reload = useCallback(() => load(), [load]);
+  return { ...state, reload };
 }
 
-export function useSocket(path: string, onMessage: (data: unknown) => void) {
+const sessionParam = "session";
+
+function readSelectedSessionId(): string | null {
+  return new URL(window.location.href).searchParams.get(sessionParam);
+}
+
+export function useSelectedSessionId() {
+  const [selectedId, setSelectedId] = useState(readSelectedSessionId);
+
+  const select = useCallback((sessionId: string | null) => {
+    setSelectedId(sessionId);
+    const url = new URL(window.location.href);
+    if (sessionId) url.searchParams.set(sessionParam, sessionId);
+    else url.searchParams.delete(sessionParam);
+    window.history.replaceState(window.history.state, "", url);
+  }, []);
+
+  return [selectedId, select] as const;
+}
+
+export function useSocket(path: string | null, onMessage: (data: unknown) => void) {
   const onData = useEffectEvent(onMessage);
 
   useEffect(() => {
+    if (!path) return;
     let socket: WebSocket | undefined;
     let timer: number | undefined;
     let attempt = 0;
@@ -95,13 +129,13 @@ export function useSocket(path: string, onMessage: (data: unknown) => void) {
   }, [path]);
 }
 
-export function useLogs(limit = 1000) {
+export function useLogs(sessionId: string | null, limit = 1000) {
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const sequence = useRef(0);
   const pending = useRef<LogEntry[]>([]);
   const frame = useRef<number | null>(null);
 
-  useSocket("/v1/sessions/logs", (data) => {
+  useSocket(sessionId && sessionPath(sessionId, "logs"), (data) => {
     const events = (Array.isArray(data) ? data : [data]).filter(isBrowserEvent);
     if (events.length === 0) return;
     const next = events.map((event) => ({
@@ -129,10 +163,10 @@ export function useLogs(limit = 1000) {
   return entries;
 }
 
-export function usePageId() {
+export function usePageId(sessionId: string | null) {
   const [pageId, setPageId] = useState<string | null>(null);
 
-  useSocket("/v1/sessions/pageId", (data) => {
+  useSocket(sessionId && sessionPath(sessionId, "pageId"), (data) => {
     if (typeof data === "object" && data !== null && "pageId" in data) {
       if (typeof data.pageId === "string") setPageId(data.pageId);
     }

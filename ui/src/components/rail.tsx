@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { Tone } from "../format";
 import {
   ArrowUpRightIcon,
@@ -22,7 +23,15 @@ const links = [
   { href: "https://github.com/steel-dev/steel-browser", label: "GitHub", icon: BranchIcon },
 ];
 
-export function Rail({ status, onCollapse }: { status: ApiStatus; onCollapse: () => void }) {
+export function Rail({
+  status,
+  onCollapse,
+  children,
+}: {
+  status: ApiStatus;
+  onCollapse: () => void;
+  children?: ReactNode;
+}) {
   const problem = problems[status];
 
   return (
@@ -55,6 +64,7 @@ export function Rail({ status, onCollapse }: { status: ApiStatus; onCollapse: ()
             </a>
           </div>
         </div>
+        {children}
         <div className="rail-group">
           <p className="rail-group-title">External</p>
           <div className="rail-items">

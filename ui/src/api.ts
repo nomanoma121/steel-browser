@@ -29,9 +29,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
-export async function getActiveSession(signal: AbortSignal): Promise<SessionDetails | null> {
+export async function getSessions(signal?: AbortSignal): Promise<SessionDetails[]> {
   const { sessions } = await request<MultipleSessions>("/v1/sessions", { signal });
-  return sessions[0] ?? null;
+  return sessions;
+}
+
+export function sessionPath(sessionId: string, route: string): string {
+  return `/v1/sessions/${encodeURIComponent(sessionId)}/${route}`;
 }
 
 export function createSession(body: CreateSession): Promise<SessionDetails> {
@@ -43,7 +47,7 @@ export function createSession(body: CreateSession): Promise<SessionDetails> {
 }
 
 export function releaseSession(id: string): Promise<ReleaseSession> {
-  return request<ReleaseSession>(`/v1/sessions/${encodeURIComponent(id)}/release`, {
+  return request<ReleaseSession>(sessionPath(id, "release"), {
     method: "POST",
   });
 }

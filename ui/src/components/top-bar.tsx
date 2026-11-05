@@ -3,25 +3,32 @@ import { CopyButton } from "./copy-button";
 import { ChevronRightIcon, ConsoleIcon, DevToolsIcon, RailIcon } from "./icons";
 import { NewSessionButton } from "./new-session";
 import { ReleaseButton } from "./release-button";
+import { SessionSwitcher } from "./session-list";
 
 export function TopBar({
   session,
+  sessions,
   railOpen,
   onToggleRail,
   consoleOpen,
   onToggleConsole,
   devtoolsOpen,
   onToggleDevtools,
-  onSessionChange,
+  onSelect,
+  onStarted,
+  onReleased,
 }: {
   session: SessionDetails | null | undefined;
+  sessions: SessionDetails[] | undefined;
   railOpen: boolean;
   onToggleRail: () => void;
   consoleOpen: boolean;
   onToggleConsole: () => void;
   devtoolsOpen: boolean;
   onToggleDevtools: () => void;
-  onSessionChange: () => void;
+  onSelect: (id: string) => void;
+  onStarted: (id: string) => void;
+  onReleased: () => void;
 }) {
   const consoleLabel = consoleOpen ? "Hide logs" : "Show logs";
   const devtoolsLabel = devtoolsOpen ? "Hide DevTools" : "Show DevTools";
@@ -52,7 +59,7 @@ export function TopBar({
           <ConsoleIcon />
         </button>
       )}
-      {session?.debugUrl && (
+      {session?.status === "live" && session.debugUrl && (
         <button
           type="button"
           className="bar-button devtools-toggle"
@@ -76,12 +83,17 @@ export function TopBar({
           </>
         )}
       </nav>
-      {session && (
+      {sessions && (
         <div className="top-bar-actions">
-          {session.status === "live" && (
-            <ReleaseButton sessionId={session.id} onReleased={onSessionChange} />
+          <SessionSwitcher
+            sessions={sessions}
+            selectedId={session?.id ?? null}
+            onSelect={onSelect}
+          />
+          {session?.status === "live" && (
+            <ReleaseButton sessionId={session.id} onReleased={onReleased} />
           )}
-          <NewSessionButton onStarted={onSessionChange} />
+          <NewSessionButton onStarted={onStarted} />
         </div>
       )}
     </header>
