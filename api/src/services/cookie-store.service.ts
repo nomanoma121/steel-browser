@@ -27,6 +27,7 @@ const toCookieParam = ({
 // Rounded so float noise in expires does not bounce a cookie between sessions.
 const fingerprint = (c: Cookie) =>
   JSON.stringify({ ...toCookieParam(c), expires: c.session ? undefined : Math.round(c.expires) });
+const differs = (a?: Cookie, b?: Cookie) => (a && fingerprint(a)) !== (b && fingerprint(b));
 const isExpired = (c: Cookie, now: number) =>
   !c.session && c.expires > 0 && c.expires * 1000 <= now;
 const deletion = (c: Cookie): CookieParam => ({ ...toCookieParam(c), value: "", expires: 1 });
@@ -35,10 +36,12 @@ const deletion = (c: Cookie): CookieParam => ({ ...toCookieParam(c), value: "", 
  * Shares cookies between all live sessions and persists them to a file.
  * Each sync diffs every session against its last snapshot and copies the
  * changes (including deletions) to the store and the other sessions.
+ * A new session's first snapshot is the store at its creation.
  */
 export class CookieStore {
   private readonly cookies = new Map<string, Cookie>();
   private readonly seen = new Map<string, Map<string, Cookie>>();
+  private readonly created = new Map<string, Map<string, Cookie>>();
   private syncing?: Promise<void>;
   private timer?: NodeJS.Timeout;
 
@@ -61,8 +64,13 @@ export class CookieStore {
   }
 
   // Cookies passed at session creation come last so they win.
-  withStoredCookies<T>(cookies: T[] = []): (T | CookieParam)[] {
+  cookiesForNewSession<T>(sessionId: string, cookies: T[] = []): (T | CookieParam)[] {
+    this.created.set(sessionId, new Map(this.cookies));
     return [...[...this.cookies.values()].map(toCookieParam), ...cookies];
+  }
+
+  forget(sessionId: string): void {
+    this.created.delete(sessionId);
   }
 
   start(intervalMs: number): void {
@@ -94,23 +102,11 @@ export class CookieStore {
       const current = await jar.getCookies().catch(() => undefined);
       if (!current) continue;
       const now = new Map(current.map((c) => [key(c), c]));
-      const prev = this.seen.get(jar.id);
+      const prev = this.seen.get(jar.id) ?? (await this.catchUp(jar, now));
       this.seen.set(jar.id, now);
 
-      // A new session is compared with the store and given what it lacks.
-      const base = prev ?? this.cookies;
-      const changed = current.filter((c) => {
-        const old = base.get(key(c));
-        return !old || fingerprint(old) !== fingerprint(c);
-      });
-      const removed = prev ? [...prev].filter(([k]) => !now.has(k)).map(([, c]) => c) : [];
-      if (!prev) {
-        const missing = [...this.cookies].filter(([k]) => !now.has(k)).map(([, c]) => c);
-        if (missing.length) {
-          await jar.setCookies(missing.map(toCookieParam)).catch(() => undefined);
-          for (const c of missing) now.set(key(c), c);
-        }
-      }
+      const changed = [...now.values()].filter((c) => differs(prev.get(key(c)), c));
+      const removed = [...prev].filter(([k]) => !now.has(k)).map(([, c]) => c);
       if (!changed.length && !removed.length) continue;
 
       dirty = true;
@@ -132,6 +128,46 @@ export class CookieStore {
       }
     }
     if (dirty) await this.save();
+  }
+
+  /**
+   * Returns the snapshot a new session's own changes are diffed against: the store
+   * as it was when the session was created. Store changes made while it was
+   * starting are copied into the session (and `now`) unless it changed them too.
+   */
+  private async catchUp(jar: CookieJar, now: Map<string, Cookie>) {
+    const base = this.created.get(jar.id) ?? new Map([...this.cookies].filter(([k]) => now.has(k)));
+    this.created.delete(jar.id);
+
+    const keys = new Set([...base.keys(), ...now.keys(), ...this.cookies.keys()]);
+    const stale = [...keys].filter(
+      (k) => !differs(base.get(k), now.get(k)) && differs(base.get(k), this.cookies.get(k)),
+    );
+    if (!stale.length) return base;
+    const params = stale.map((k) => {
+      const c = this.cookies.get(k);
+      return c ? toCookieParam(c) : deletion(base.get(k)!);
+    });
+    if (
+      !(await jar.setCookies(params).then(
+        () => true,
+        () => false,
+      ))
+    )
+      return base;
+
+    const prev = new Map(base);
+    for (const k of stale) {
+      const c = this.cookies.get(k);
+      if (c) {
+        prev.set(k, c);
+        now.set(k, c);
+      } else {
+        prev.delete(k);
+        now.delete(k);
+      }
+    }
+    return prev;
   }
 
   private async save(): Promise<void> {

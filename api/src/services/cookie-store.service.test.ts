@@ -74,7 +74,7 @@ const values = (j: ReturnType<typeof jar>) =>
 describe("CookieStore", () => {
   it("puts stored cookies before the ones given at creation", async () => {
     const { store } = await setup([cookie("a", "1")]);
-    expect(store.withStoredCookies([{ name: "a", value: "2" }])).toEqual([
+    expect(store.cookiesForNewSession("s", [{ name: "a", value: "2" }])).toEqual([
       expect.objectContaining({ name: "a", value: "1" }),
       { name: "a", value: "2" },
     ]);
@@ -88,9 +88,9 @@ describe("CookieStore", () => {
       cookie("kept", "1", { session: false, expires: future }),
       cookie("session", "1"),
     ]);
-    const names = store.withStoredCookies().map((c) => c.name);
+    const names = store.cookiesForNewSession("s").map((c) => c.name);
     expect(names.sort()).toEqual(["kept", "session"]);
-    const session = store.withStoredCookies().find((c) => c.name === "session")!;
+    const session = store.cookiesForNewSession("s").find((c) => c.name === "session")!;
     expect(session).not.toHaveProperty("expires");
   });
 
@@ -98,7 +98,7 @@ describe("CookieStore", () => {
     const path = join(await mkdtemp(join(tmpdir(), "cookie-store-")), "cookies.json");
     const store = new CookieStore(path, () => [], logger);
     await store.load();
-    expect(store.withStoredCookies()).toEqual([]);
+    expect(store.cookiesForNewSession("s")).toEqual([]);
   });
 
   it("fills a new session from the store and learns the cookies it brought", async () => {
@@ -113,6 +113,51 @@ describe("CookieStore", () => {
     expect(values(fresh)).toEqual(["a=1", "login=x"]);
     expect(values(other)).toEqual(["a=1", "login=x"]);
     expect(await saved()).toEqual(["a=1", "login=x"]);
+  });
+
+  it("keeps a deletion made before the new session's first sync", async () => {
+    const { store, jars, saved } = await setup([cookie("x", "1"), cookie("y", "1")]);
+    const fresh = jar("fresh");
+    await fresh.setCookies(store.cookiesForNewSession("fresh"));
+    fresh.store.delete("x");
+    jars.push(fresh);
+    await store.sync();
+    expect(values(fresh)).toEqual(["y=1"]);
+    expect(await saved()).toEqual(["y=1"]);
+  });
+
+  it("copies store changes made while a session was starting", async () => {
+    const { store, jars, saved } = await setup([cookie("x", "1"), cookie("y", "1")]);
+    const a = jar("a", [cookie("x", "1"), cookie("y", "1")]);
+    jars.push(a);
+    await store.sync();
+    const fresh = jar("fresh");
+    await fresh.setCookies(store.cookiesForNewSession("fresh"));
+    a.store.set("x", cookie("x", "2"));
+    a.store.delete("y");
+    a.store.set("z", cookie("z", "1"));
+    await store.sync();
+    jars.push(fresh);
+    await store.sync();
+    expect(values(fresh)).toEqual(["x=2", "z=1"]);
+    expect(values(a)).toEqual(["x=2", "z=1"]);
+    expect(await saved()).toEqual(["x=2", "z=1"]);
+  });
+
+  it("lets a starting session's own change win over the store's", async () => {
+    const { store, jars } = await setup([cookie("x", "1")]);
+    const a = jar("a", [cookie("x", "1")]);
+    jars.push(a);
+    await store.sync();
+    const fresh = jar("fresh");
+    await fresh.setCookies(store.cookiesForNewSession("fresh"));
+    a.store.set("x", cookie("x", "2"));
+    await store.sync();
+    fresh.store.set("x", cookie("x", "3"));
+    jars.push(fresh);
+    await store.sync();
+    expect(values(a)).toEqual(["x=3"]);
+    expect(values(fresh)).toEqual(["x=3"]);
   });
 
   it("copies changes and deletions to the other sessions and the file", async () => {
@@ -155,6 +200,6 @@ describe("CookieStore", () => {
     jars.length = 0;
     await store.sync();
     expect(await saved()).toEqual(["x=1"]);
-    expect(store.withStoredCookies().map((c) => c.name)).toEqual(["x"]);
+    expect(store.cookiesForNewSession("s").map((c) => c.name)).toEqual(["x"]);
   });
 });
