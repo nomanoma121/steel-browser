@@ -111,7 +111,9 @@ const browserWebSocket: FastifyPluginAsync<BrowserSocketOptions> = async (
           }
         }
       } else {
-        const session = fastify.sessionService.getOnlyActiveSession();
+        const session = params.sessionId
+          ? fastify.sessionService.resolveLiveSession(params.sessionId)
+          : fastify.sessionService.getOnlyActiveSession();
         if (session?.isSelenium) {
           rejectSocket(socket, 409, "Session does not expose CDP");
           return;
