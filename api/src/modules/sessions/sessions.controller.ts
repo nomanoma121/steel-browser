@@ -5,15 +5,16 @@ import { CreateSessionRequest, SessionDetails, SessionStreamRequest } from "./se
 import { CookieData } from "../../services/context/types.js";
 import { getUrl, getBaseUrl, getSessionUrl } from "../../utils/url.js";
 import { SessionServiceError } from "../../services/session.service.js";
+import { v4 as uuidv4 } from "uuid";
 
 export const handleLaunchBrowserSession = async (
   server: FastifyInstance,
   request: CreateSessionRequest,
   reply: FastifyReply,
 ) => {
+  const sessionId = request.body.sessionId ?? uuidv4();
   try {
     const {
-      sessionId,
       proxyUrl,
       userDataDir,
       persist,
@@ -37,7 +38,7 @@ export const handleLaunchBrowserSession = async (
     const context = server.cookieStore
       ? {
           ...sessionContext,
-          cookies: server.cookieStore.withStoredCookies(sessionContext?.cookies),
+          cookies: server.cookieStore.cookiesForNewSession(sessionId, sessionContext?.cookies),
         }
       : sessionContext;
     return await server.sessionService.startSession({
@@ -65,6 +66,7 @@ export const handleLaunchBrowserSession = async (
       headless,
     });
   } catch (e: unknown) {
+    server.cookieStore?.forget(sessionId);
     server.log.error({ err: e }, "Failed launching browser session");
     const error = getErrors(e);
     const statusCode = e instanceof SessionServiceError ? e.statusCode : 500;
