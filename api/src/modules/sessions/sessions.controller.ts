@@ -34,13 +34,19 @@ export const handleLaunchBrowserSession = async (
       headless,
     } = request.body;
 
+    const context = server.cookieStore
+      ? {
+          ...sessionContext,
+          cookies: server.cookieStore.withStoredCookies(sessionContext?.cookies),
+        }
+      : sessionContext;
     return await server.sessionService.startSession({
       sessionId,
       proxyUrl,
       userDataDir,
       persist,
       userAgent,
-      sessionContext: sessionContext as {
+      sessionContext: context as {
         cookies?: CookieData[] | undefined;
         localStorage?: Record<string, Record<string, any>> | undefined;
       },

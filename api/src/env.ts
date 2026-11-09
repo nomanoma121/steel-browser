@@ -73,6 +73,7 @@ const envSchema = z.object({
     .default("false"),
   PROXY_INTERNAL_BYPASS: z.string().optional(),
   CHROME_USER_DATA_DIR: z.string().optional(),
+  COOKIE_STORE_PATH: z.string().optional(),
   LOG_STORAGE_ENABLED: z
     .string()
     .optional()

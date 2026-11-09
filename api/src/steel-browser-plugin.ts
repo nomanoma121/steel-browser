@@ -27,6 +27,7 @@ import { WebSocketHandler } from "./types/websocket.js";
 import { WebSocketRegistryService } from "./services/websocket-registry.service.js";
 import { SessionService } from "./services/session.service.js";
 import { BrowserPool } from "./services/browser-pool.service.js";
+import { CookieStore } from "./services/cookie-store.service.js";
 import { LogStorage } from "./services/cdp/instrumentation/storage/log-storage.interface.js";
 
 // We need to redeclare any decorators from within the plugin that we want to expose
@@ -36,6 +37,7 @@ declare module "fastify" {
     cdpService: CDPService;
     browserPool: BrowserPool;
     sessionService: SessionService;
+    cookieStore: CookieStore | null;
     webSocketRegistry: WebSocketRegistryService;
     commandEngine: SessionCommandEngineRegistry | null;
     registerCDPLaunchHook: (hook: (config: BrowserLauncherOptions) => Promise<void> | void) => void;
